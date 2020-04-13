@@ -35,7 +35,7 @@
         {
          "columns":20,
          "firstgid":161,
-         "image":"..\/kenney_topdowntanksredux\/Tilesheet\/terrainTiles_default.png",
+         "image":"terrainTiles_default.png",
          "imageheight":256,
          "imagewidth":640,
          "margin":0,
