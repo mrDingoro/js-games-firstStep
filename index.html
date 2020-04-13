@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas</title>
+</head>
+<body>
+    <canvas id="canvas" width="800" height="600" style="border: 1px solid magenta" ></canvas>
+    <div id="result"></div>
+    <script>
+
+
+        let mapManager = {
+            mapData: null, // переменная для хранения карты
+            tLayer: null, // переменная для хранения ссылки на блоки карты
+            xCount: 0, // количество блоков по горизонтали
+            yCount: 0, // количество блоков по вертикали
+            tSize: {x: 32, y: 32}, // размер блока
+            mapSize: {x: 32, y: 32}, // размер карты в пикселях (вычисляется)
+            tilesets: new Array(), // массив описаний блоков
+            imgLoadCount: 0, //колличество загруженных изображений
+            imgLoaded: false, // все изображения загружены (сначала - false)
+            jsonLoaded: false, // json описание загружено (сначала - false)
+            view: {
+                x: 0,
+                y: 0,
+                w: 800,
+                h: 600
+            },
+            loadMap(path){
+                let request = new XMLHttpRequest(); // создание ajax-запроса
+                request.onreadystatechange = function () {
+                    if (request.readyState === 4 && request.status === 200) {
+                        // Получен корректный ответ, результат можно обрабатывать 
+                        mapManager.parseMap(request.responseText);
+                    }
+                };
+                request.open("GET", path, true);
+                //true - отправить асинхронный запрос на path с испольхованием функции GET
+                request.send(); // отправить запрос
+            },
+            parseMap(tilesJSON) {
+                this.mapData = JSON.parse(tilesJSON); //разобрать JSON
+                this.xCount = this.mapData.width; //сохранение ширины
+                this.yCount = this.mapData.height; //сохранение высоты
+                this.tSize.x = this.mapData.tilewidth; //сохранение размера блока
+                this.tSize.y = this.mapData.tileheight; //сохранение размера блока
+                this.mapSize.x = this.xCount * this.tSize.x; //вычисление размера карты
+                this.mapSize.y = this.yCount * this.tSize.y; //вычисление размера карты
+                for (let i = 0; i < this.mapData.tilesets.length; i++) {
+                    let img = new Image(); //Создаем переменную для хранения изображения
+                    img.onload = function () { //при загрузке изображения
+                        mapManager.imgLoadCount++; //увеличиваем счетчик
+                        if (mapManager.imgLoadCount === mapManager.mapData.tilesets.length) {
+                            mapManager.imgLoaded = true; // загружены все изображения
+                        }
+                    }; //конец описания функции onload
+                    img.src = this.mapData.tilesets[i].image; // Задание пути к изображению
+                    let t = this.mapData.tilesets[i]; //забираем tilesets из карты
+                    let ts = { // создаем свой объект tileset
+                        firstgid: t.firstgid, // firsgid - с него начинается нумерация в data
+                        image: img, //объект рисунка
+                        name: t.name, //имя эдемента рисунка
+                        xCount: Math.floor(t.imagewidth / mapManager.tSize.x), //горизонталь
+                        yCount: Math.floor(t.imageheight / mapManager.tSize.y) //вертикаль
+                    };// конец объявления объекта ts
+                    this.tilesets.push(ts); //сохраняем tileset в массив
+                } //окончание цикла for
+                this.jsonLoaded = true; // true, когда разобрали весь json
+            },
+            draw(ctx) {// нарисовать карту в контексте
+                // если карта не загружена, то повторить прорисовку через 100 мсек
+                if (!mapManager.imgLoaded || !mapManager.jsonLoaded) {
+                    setTimeout(function () { mapManager.draw(ctx); }, 100);
+                } else {
+                    if (this.tLayer === null) { // проверить что tLayer настроен
+                        for (let id = 0; id < this.mapData.layers.length; id++) {
+                            // проходим по всем layer карты
+                            let layer =  this.mapData.layers[id];
+                            if (layer.type === "tilelayer") { //если не tilelayer - пропускаем
+                                this.tLayer = layer;
+                                break;
+                            }
+                        } //окончание цикла for
+                    }
+                    
+                    for (let i = 0; i < this.tLayer.data.length; i++) { // пройти по всей карте
+                        if (this.tLayer.data[i]!==0) { //если нет данных - пропускаем
+                        
+                            let tile = this.getTile(this.tLayer.data[i]); //получение блока по индексу
+                            // i проходит линейно по массиву, xCount -длина по x
+                            let pX = (i % this.xCount) * this.tSize.x; //вычисляем x в пикселях
+                            let pY = Math.floor(i / this.xCount) * this.tSize.y; //вычисляем y в пикселях
+                            // не рисуем за пределами видимой зоной
+                            if (!this.isVisible(pX, pY, this.tSize.x, this.tSize.y)) {
+                                continue;
+                            }
+                            pX -= this.view.x;
+                            pY -= this.view.y;
+                            // рисуем контекст
+                            
+                            ctx.drawImage(tile.img, tile.px, tile.py, this.tSize.x, this.tSize.y, pX, pY, this.tSize.x, this.tSize.y);                        
+                        }
+                    } // окончание цикла for
+                } // окончание if-else
+            },
+            isVisible(x, y, width, height) { // не рисуем за пределами видимой зоны
+                if (x + width < this.view.x || y + height < this.view.y || x > this.view.x + this.view.w || y > this.view.y + this.view.h) {
+                    return true;
+                }
+            },
+            getTile(tileIndex) { //идекс блока
+                let tile = { // один блок
+                    img: null, // изображение tileset
+                    px: 0,
+                    py:0 //координаты блока в tileset
+                };
+                let tileset = this.getTileset(tileIndex);
+                tile.img = tileset.image; // изображение искомого tileset
+                let id = tileIndex - tileset.firstgid; // индекс блока в tileset
+                // блок прямоугольный, остаток от деления на XCount дает 'x' в tileset
+                let x = id % tileset.xCount;
+                //округление от деление на xCount дает 'y' в tileset
+                let y = Math.floor(id / tileset.xCount);
+                //с учетом размера можно посчитать координаты блока в пикселях
+                tile.px = x * mapManager.tSize.x;
+                tile.py = y * mapManager.tSize.y;
+                return tile; // возвращаем блок для отображения
+            },
+            getTileset(tileIndex) {
+                for (let i = mapManager.tilesets.length -1; i >= 0; i--) {
+                    // в каждом tilesets[i].firstgid записано число с которого н ачинается нумерация блоков
+                    if (mapManager.tilesets[i].firstgid <= tileIndex) {
+                        //если индекс первого блока меньше либо равен искомому значит этот tileset и нужен
+                        return mapManager.tilesets[i];
+                    }
+                }
+                return null;
+            }
+        };
+        window.onload = function () {
+            var canvas = document.getElementById("canvas");
+            if (canvas.getContext) {
+                var ctx = canvas.getContext("2d");
+                mapManager.loadMap("kenney_topdowntanksredux/tileWork/firstStep.json");
+                mapManager.draw(ctx);
+            }
+        }
+
+        /*function loadMap(path){
+            let request = new XMLHttpRequest(); // создание ajax-запроса
+            request.onreadystatechange = function () {
+                if (request.readyState === 4 && request.status === 200) {
+                    // Получен корректный ответ, результат можно обрабатывать 
+                    mapManager.parseMap(request.responseText);
+                }
+            };
+            request.open("GET", path, true);
+            //true - отправить асинхронный запрос на path с испольхованием функции GET
+            request.send(); // отправить запрос
+        }
+
+        function parseMap(tilesJSON) {
+            this.mapData = JSON.parse(tilesJSON); //разобрать JSON
+            this.xCount = this.mapData.width; //сохранение ширины
+            this.yCount = this.mapData.height; //сохранение высоты
+            this.tSize.x = this.mapData.tilewidth; //сохранение размера блока
+            this.tSize.y = this.mapData.tileheight; //сохранение размера блока
+            this.mapSize.x = this.xCount * this.tSize.x; //вычисление размера карты
+            this.mapSize.y = this.yCount * this.tSize.y; //вычисление размера карты
+            for (let i = 0; i < this.mapData.tilesets.length; i++) {
+                let img = new Image(); //Создаем переменную для хранения изображения
+                img.onload = function () { //при загрузке изображения
+                    mapManager.imgLoadCount++; //увеличиваем счетчик
+                    if (mapManager.imgLoadCount === mapManager.mapData.tilesets.length) {
+                        mapManager.imgLoaded = true; // загружены все изображения
+                    }
+                }; //конец описания функции onload
+                img.src = this.mapData.tilesets[i].image; // Задание пути к изображению
+                let t = this.mapData.tilesets[i]; //забираем tilesets из карты
+                let ts = { // создаем свой объект tileset
+                    firstgid: t.firstgid, // firsgid - с него начинается нумерация в data
+                    image: img, //объект рисунка
+                    name: t.name, //имя эдемента рисунка
+                    xCount: Math.floor(t.imagewidth / mapManager.tSize.x), //горизонталь
+                    yCount: Math.floor(t.imageheight / mapManager.tSize.y) //вертикаль
+                };// конец объявления объекта ts
+                this.tilesets.push(ts); //сохраняем tileset в массив
+            } //окончание цикла for
+            this.jsonLoaded = true; // true, когда разобрали весь json
+        }
+        
+        function draw(ctx) {// нарисовать карту в контексте
+            // если карта не загружена, то повторить прорисовку через 100 мсек
+            if (!mapManager.imgLoaded || !mapManager.jsonLoaded) {
+                setTimeout(function () { mapManager.draw(ctx); }, 100);
+            } else {
+                if (this.tLayer === null) { // проверить что tLayer настроен
+                    for (let id = 0; id < this.mapData.layers.lenght; id++) {
+                        // проходим по всем layer карты
+                        let layer =  this.mapData.layers[id];
+                        if (layer.type === "tilelayer") { //если не tilelayer - пропускаем
+                            this.tLayer = layer;
+                            break;
+                        }
+                    } //окончание цикла for
+                }
+                for (let i = 0; i < this.tLayer.data.length; i++) { // пройти по всей карте
+                    if (this.tLayer.data[i]!==0) { //если нет данных - пропускаем
+                        let tile = this.getTile(this.tLayer.data[i]); //получение блока по индексу
+                        // i проходит линейно по массиву, xCount -длина по x
+                        let pX = (i % this.xCount) * this.tSize.x; //вычисляем x в пикселях
+                        let pY = Math.floor(i / this.xCount) * this.tSize.y; //вычисляем y в пикселях
+                        // не рисуем за пределами видимой зоной
+                        if (!this.isVisible(pX, pY, this.tSize.x, this.tSize.y)) {
+                            continue;
+                        }
+                        pX -= this.view.x;
+                        pY -= this.view.y;
+                        // рисуем контекст
+                        ctx.drawImage(tile.img, tile.px, tile.py, this.tSize.x, this.tSize.y, pX, pY, this.tSize.x, this.tSize,y);                        
+                    }
+                } // окончание цикла for
+            } // окончание if-else
+        }
+        function isVisible(x, y, width, height) { // не рисуем за пределами видимой зоны
+            if (x + width < this.view.x || y + height < this.view.y || x > this.view.x + this.view.w || y > this.view.y + this.view.h) {
+                return true;
+            }
+        }
+        function getTile(tileIndex) { //идекс блока
+            let tile = { // один блок
+                img: null, // изображение tileset
+                px: 0,
+                py:0 //координаты блока в tileset
+            };
+            let tileset = this.getTileset(tileIndex);
+            tile.img = tileset.image; // изображение искомого tileset
+            let id = tileIndex - tileset.firstgid; // индекс блока в tileset
+            // блок прямоугольный, остаток от деления на XCount дает 'x' в tileset
+            let x = id % tileset.xCount;
+            //округление от деление на xCount дает 'y' в tileset
+            let y = Math.floor(id / tileset.xCount);
+            //с учетом размера можно посчитать координаты блока в пикселях
+            tile.px = x * mapManager.tSize.x;
+            tile.py = y * mapManager.tSize.y;
+            return tile; // возвращаем блок для отображения
+        }
+        function getTileset(tileIndex) {
+            for (let i = mapManager.tilesets.length -1; i >= 0; i--) {
+                // в каждом tilesets[i].firstgid записано число с которого н ачинается нумерация блоков
+                if (mapManager.tilesets[i].firstgid <= tileIndex) {
+                    //если индекс первого блока меньше либо равен искомому значит этот tileset и нужен
+                    return mapManager.tilesets[i];
+                }
+            }
+            return null;
+        }*/
+        
+        
+       
+       
+
+    </script>
+</body>
+</html>
